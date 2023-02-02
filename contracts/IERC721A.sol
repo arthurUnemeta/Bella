@@ -74,6 +74,7 @@ interface IERC721A {
      */
     error OwnershipNotInitializedForExtraData();
 
+    error CanNotApproval();
     // =============================================================
     //                            STRUCTS
     // =============================================================

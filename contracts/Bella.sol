@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
-
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import { ERC721A } from "./ERC721A.sol";
 import { Ownable } from "./Ownable.sol";
-import { MerkleProof } from "./MerkleProof.sol";
 
 pragma solidity >=0.8.17 <0.9.0;
 
@@ -13,16 +12,20 @@ error CannotMintFromContract();
 error InsufficientFunds();
 error InvalidMintAmount();
 error InvalidMintPriceChange();
-error InvalidSalesPhaseChange();
+error InvalidAllowAddress();
 error InvalidWithdrawalAmount();
 error MintAmountExceedsSupply();
 error MintAmountFreeExceedsSupply();
 error WithdrawalFailed();
-error WrongSalesPhase();
 error InvalidMerkleProof();
 error MintAmountExceedsUserAllowance();
+error InvalidSignature();
+error InvalidSignerAddress();
+error InvalidNumber();
+error AllowMintInsufficient();
+error PublicMintInsufficient();
 
-contract HanazawaKanaNFT is ERC721A, Ownable {
+contract BellaNFT is ERC721A, Ownable {
     event SetPublicPrice(
         uint indexed Price
     );
@@ -34,8 +37,12 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
         string indexed uri
     );
     event MintedCounters(
+        address indexed wallet,
         uint48 indexed amount,
-        uint48 indexed userConfig
+        uint indexed channel
+    );
+    event SetAllowAddress(
+        address indexed allowAddress
     );
 
     event SalesPhaseChanged(
@@ -48,27 +55,40 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
         uint256 indexed amount,
         address indexed to
     );
-
+    event SetApprovalTime(
+        uint indexed time
+    );
     event SetMerkleRoot(
         bytes32 indexed root
     );
-    uint48 public constant MAX_SUPPLY = 6666;
-    uint48 public constant MAX_FREE_SUPPLY = 2000;
-    uint256 public  PUBLIC_PRICE = 0.1 ether;
-    uint256 public  ALLOW_LIST_PRICE = 0.08 ether;
+    event SetSignerAddress(
+        address indexed signer
+    );
+
+    event SetAllowSupply(
+        uint256 indexed max
+    );
+    event SetPublicSupply(
+        uint256 indexed max
+    );
+
+    uint256 public constant MAX_SUPPLY = 99999999999999999;
+    uint public constant PUBLIC_CHANNEL =0;
+    uint public constant ALLOW_CHANNEL =1;
+    uint256 public MAX_ALLOW_SUPPLY = 1700;
+    uint256 public MAX_PUBLIC_SUPPLY =100;
+    uint256 public  PUBLIC_PRICE = 0.035 ether;
+    uint256 public  ALLOW_LIST_PRICE = 0.03 ether;
     uint48 public SUPPLY = 0;
-    mapping(address => bool) public FreelistClaimed;
+    uint48 public ALLOW_SUPPLYED =0;
+    uint48 public PUBLIC_SUPPLYED =0;
     uint48 public constant SECTION_BITMASK = 15;
     uint48 public constant DISTRICT_BITMASK = 4095;
-    uint8 public PUBLIC_SUPPLY =3;
-    uint8 public SALES_PHASE = 8;
-    uint8 public PUBLIC_SAlES =1;
-    uint8 public DEV_LIMIT =1;
-    uint8 public WL_SALES =2;
-    uint8 public FREE_SALES =4;
+    uint8 public ALLOW_LIMIT =2;
+    uint8 public DEV_LIMIT =2;
     string public METADATA_URL;
-    bytes32 private _merkleRoot;
-    constructor() ERC721A("HanazawaKanaNFT", "KANA") {}
+    address public signers = 0x0bE1a47adA1A649FFae7f3927aFD10568297A7A8;
+    constructor() ERC721A("TestBull", "TestBull") {}
 
     //modifiers
     modifier callerIsUser() {
@@ -82,61 +102,30 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
         );
         _;
     }
-
-    function freeMint(bytes32[] calldata _proof, uint48 _inputConfig) 
-        external
-        callerIsUser
-    {
-        uint48 amountAllowed = (_inputConfig >> 16) & SECTION_BITMASK;
-        uint48 userSalesPhase = (_inputConfig >> 24) & SECTION_BITMASK;
-        uint48 Amount = _inputConfig & DISTRICT_BITMASK;
-        if (Amount == 0) revert InvalidMintAmount();
-        if (SUPPLY+Amount > MAX_FREE_SUPPLY) revert MintAmountFreeExceedsSupply();
-
-        bytes32 leaf = keccak256(abi.encodePacked(msg.sender,amountAllowed,userSalesPhase));
-        if (!MerkleProof.verifyCalldata(_proof, _merkleRoot, leaf)) revert InvalidMerkleProof();
-        if (userSalesPhase != SALES_PHASE) revert WrongSalesPhase();
-        if (SALES_PHASE != FREE_SALES) revert WrongSalesPhase();
- 
-        uint64 userAux = _getAux(msg.sender);
-        uint64 allowlistMinted = (userAux >> 8) & SECTION_BITMASK;
-        if (allowlistMinted + Amount > amountAllowed) revert MintAmountExceedsUserAllowance();
-        
-
-        _mint(msg.sender, Amount);
-        uint64 updatedAux = userAux + (Amount << 8);
-        emit MintedCounters(Amount, _inputConfig);
-        _setAux(msg.sender, updatedAux);
-        SUPPLY += Amount;
-    }
-
-    function whitelistMint(bytes32[] calldata _proof, uint48 _inputConfig)
+    function whitelistMint(uint48 _mintAmount, bytes memory signature)
         external
         payable
         callerIsUser
     {
-        uint48 amountAllowed = (_inputConfig >> 16) & SECTION_BITMASK;
-        uint48 userSalesPhase = (_inputConfig >> 24) & SECTION_BITMASK;
-        uint48 Amount = _inputConfig & DISTRICT_BITMASK;
-        if (Amount == 0) revert InvalidMintAmount();
-        if (SUPPLY+Amount > MAX_SUPPLY) revert MintAmountExceedsSupply();
-      
-        bytes32 leaf = keccak256(abi.encodePacked(msg.sender, amountAllowed,userSalesPhase));
-        if (!MerkleProof.verifyCalldata(_proof, _merkleRoot, leaf)) revert InvalidMerkleProof();
-        if (userSalesPhase != SALES_PHASE) revert WrongSalesPhase();
-        if (SALES_PHASE != WL_SALES) revert WrongSalesPhase();
+        if (_mintAmount == 0) revert InvalidMintAmount();
+        if (SUPPLY+_mintAmount > MAX_SUPPLY) revert MintAmountExceedsSupply();
+        if (ALLOW_SUPPLYED +_mintAmount >MAX_ALLOW_SUPPLY) revert AllowMintInsufficient();
+
+        bytes32 x = keccak256(abi.encodePacked(msg.sender));
+        if (ECDSA.recover(x, signature) != signers) revert InvalidSignature();
 
         uint64 userAux = _getAux(msg.sender);
         uint64 allowlistMinted = (userAux >> 4) & SECTION_BITMASK;
-        if (allowlistMinted + Amount > amountAllowed) revert MintAmountExceedsUserAllowance();
+        if (allowlistMinted + _mintAmount > ALLOW_LIMIT) revert MintAmountExceedsUserAllowance();
         
-        if (msg.value < Amount * ALLOW_LIST_PRICE) revert InsufficientFunds();
+        if (msg.value < _mintAmount * ALLOW_LIST_PRICE) revert InsufficientFunds();
 
-        _mint(msg.sender, Amount);
-        uint64 updatedAux = userAux + (Amount << 4);
-        emit MintedCounters(Amount, _inputConfig);
+        _mint(msg.sender, _mintAmount);
+        uint64 updatedAux = userAux + (_mintAmount << 4);
         _setAux(msg.sender, updatedAux);
-        SUPPLY += Amount;
+        SUPPLY += _mintAmount;
+        emit MintedCounters(msg.sender,_mintAmount,ALLOW_CHANNEL);
+
     }
 
 
@@ -146,18 +135,12 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
         callerIsUser
         mintPublic(_mintAmount)
     {
-        if (SALES_PHASE != PUBLIC_SAlES) revert WrongSalesPhase();
         if (_mintAmount == 0) revert InvalidMintAmount();
-
-        uint64 userAux = _getAux(msg.sender);
-        uint64 allowlistMinted = (userAux >> 12) & SECTION_BITMASK;
-        if (allowlistMinted + _mintAmount > PUBLIC_SUPPLY) revert MintAmountExceedsUserAllowance();
+        if (SUPPLY + _mintAmount > MAX_SUPPLY) revert MintAmountExceedsSupply();
+        if (PUBLIC_SUPPLYED +_mintAmount>MAX_PUBLIC_SUPPLY) revert PublicMintInsufficient();
         if (msg.value < _mintAmount * PUBLIC_PRICE) revert InsufficientFunds();
-
         _mint(msg.sender, _mintAmount);
-        uint64 updatedAux = userAux + (_mintAmount << 12);
-        emit MintedCounters(_mintAmount, 0);
-        _setAux(msg.sender, updatedAux);
+        emit MintedCounters(msg.sender,_mintAmount,PUBLIC_CHANNEL);
         SUPPLY += _mintAmount;
     }
 
@@ -172,16 +155,35 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
         _mint(_to, _numberOfTokens);
         SUPPLY += _numberOfTokens;
     }
-
-
-    function setMerkleRoot(bytes32 newRoot_) 
-        external 
-        onlyOwner 
+    function setSigner(address _signer)
+        external
+        onlyOwner
     {
-        _merkleRoot = newRoot_;
-        emit SetMerkleRoot(_merkleRoot);
+            if (_signer == address(0)) revert InvalidSignerAddress();
+            signers = _signer;
+            emit SetSignerAddress(_signer);
     }
+
    
+    function setMaxAllowSupply(uint256 _max)
+    external
+    onlyOwner{
+        if (_max==0) revert InvalidNumber();
+        if (_max>ALLOW_SUPPLYED) revert InvalidNumber();
+        MAX_ALLOW_SUPPLY = _max;
+        emit SetAllowSupply(_max);
+    }
+
+    
+    function setMaxPublicSupply(uint256 _max)
+    external
+    onlyOwner{
+        if (_max==0) revert InvalidNumber();
+        if (_max>PUBLIC_SUPPLYED) revert InvalidNumber();
+        MAX_PUBLIC_SUPPLY = _max;
+        emit SetPublicSupply(_max);
+    }
+
     function setURI(string calldata _uri) 
         external 
         onlyOwner 
@@ -190,25 +192,13 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
         emit SetURI(_uri);
     }
 
-    function demoteSalesPhase(uint8 amount)
-        external 
-        onlyOwner 
-    {
-        uint8 resultingPhase = SALES_PHASE >> amount;
-        if (resultingPhase == 0) revert InvalidSalesPhaseChange();
-        SALES_PHASE = resultingPhase;
-        emit SalesPhaseChanged(SALES_PHASE);
+    function setApprovalTime(uint _time)
+    external
+    onlyOwner{
+        _setApprovedStartTime(_time);
+        emit SetApprovalTime(_time);
     }
 
-    function promoteSalesPhase(uint8 amount)
-        external 
-        onlyOwner 
-    {
-        uint8 resultingPhase = SALES_PHASE << amount;
-        if (resultingPhase == 0) revert InvalidSalesPhaseChange();
-        SALES_PHASE = resultingPhase;
-        emit SalesPhaseChanged(SALES_PHASE);
-    }
    
     function setPublicMintPrice(uint _mintPrice) 
         external 
@@ -240,10 +230,10 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
         emit Withdraw(_amount,_to);
         if (!success) revert WithdrawalFailed();
     }
+    //publice function
 
     function burn(uint256 _tokenId) 
-        external
-        onlyOwner 
+        external   
     {
         if(!_isApprovedOrOwner(_msgSender(), _tokenId)) revert IsNotTokenOwnerNorApproved();
         _burn(_tokenId, true);
@@ -255,6 +245,19 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
         return (spender == owner || isApprovedForAll(owner, spender) || getApproved(tokenId) == spender);
     }
 
+    function getTime()
+        public 
+        view 
+        returns(uint) {
+            uint time = getDate();
+            return time;
+    }
+    function getApprovedStartTime()
+        public
+        view
+    returns(uint){
+        return _getApprovedStartTime();
+    }
     function numberMinted(address owner) 
         public 
         view 
@@ -276,6 +279,7 @@ contract HanazawaKanaNFT is ERC721A, Ownable {
     {
         return (_getAux(owner) >> 8) & SECTION_BITMASK;
     }
+
     function numberMintedPublic(address owner) 
         public 
         view 
