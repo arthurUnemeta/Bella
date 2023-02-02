@@ -591,7 +591,7 @@
 	},
 	"settings": {
 		"compilationTarget": {
-			"Bella_flat.sol": "ERC721A"
+			"HanazawaKana_flat.sol": "ERC721A"
 		},
 		"evmVersion": "london",
 		"libraries": {},
@@ -605,11 +605,12 @@
 		"remappings": []
 	},
 	"sources": {
-		"Bella_flat.sol": {
-			"keccak256": "0x660f7f8bfabed69b7fd5a1ff85c554a2b121d1970762995b487df943b4f44ba6",
+		"HanazawaKana_flat.sol": {
+			"keccak256": "0xc23df390ae75da26c4b44a6bb285009121237c7e3e7428a26159a00469e8a25a",
+			"license": "MIT",
 			"urls": [
-				"bzz-raw://5fe236c8d05fdbe13cde6df895e71a98fceae64d9eaf3a5918bdf1ce8774f8ae",
-				"dweb:/ipfs/QmQDfKLoFa7paZ3ypNmNZ7T3BKwM8u3oh4QH5eU6ryeBVm"
+				"bzz-raw://5c890879362474e45f9a840ed8ff0448c916ad1f9f29d6952322325dc93282a3",
+				"dweb:/ipfs/QmfGbAd382pjwkpCJCsUrNakmqJaC4MJwN5wdAAZMYtn6G"
 			]
 		}
 	},
