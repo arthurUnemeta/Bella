@@ -72,23 +72,36 @@ contract BellaNFT is ERC721A, Ownable {
         uint256 indexed max
     );
 
-    uint256 public constant MAX_SUPPLY = 99999999999999999;
+    uint256 public constant MAX_SUPPLY = 1800;
     uint public constant PUBLIC_CHANNEL =0;
     uint public constant ALLOW_CHANNEL =1;
     uint256 public MAX_ALLOW_SUPPLY = 1700;
     uint256 public MAX_PUBLIC_SUPPLY =100;
-    uint256 public  PUBLIC_PRICE = 0.035 ether;
-    uint256 public  ALLOW_LIST_PRICE = 0.03 ether;
+    uint256 public  PUBLIC_PRICE = 0.0002 ether;
+    uint256 public  ALLOW_LIST_PRICE = 0.0001 ether;
     uint48 public SUPPLY = 0;
     uint48 public ALLOW_SUPPLYED =0;
     uint48 public PUBLIC_SUPPLYED =0;
     uint48 public constant SECTION_BITMASK = 15;
-    uint48 public constant DISTRICT_BITMASK = 4095;
-    uint8 public ALLOW_LIMIT =2;
-    uint8 public DEV_LIMIT =2;
+    uint48 public DEV_LIMIT =1700;
+    uint48 public PUBLIC_LIMIT =2;
     string public METADATA_URL;
-    address public signers = 0x0bE1a47adA1A649FFae7f3927aFD10568297A7A8;
-    constructor() ERC721A("TestBull", "TestBull") {}
+    uint8 public ALLOW_LIMIT =2;
+    uint public SELL_END_TIME;
+    uint public SELL_START_TIME;
+    address private SIGNER;
+    constructor(uint _sellEndTime,//sell end time 
+    uint _approveStartTime, // approve start time 
+    uint _sellStartTime,//sell start time
+    address _signer, //signer
+    string memory _uri //metadatauri
+    ) ERC721A("TestBella", "TestBella"){
+        SELL_END_TIME = _sellEndTime;
+        SIGNER = _signer;
+        SELL_START_TIME =_sellStartTime;
+        _setApprovedStartTime(_approveStartTime);
+        METADATA_URL = _uri;
+    }
 
     //modifiers
     modifier callerIsUser() {
@@ -106,26 +119,27 @@ contract BellaNFT is ERC721A, Ownable {
         external
         payable
         callerIsUser
-    {
-        if (_mintAmount == 0) revert InvalidMintAmount();
-        if (SUPPLY+_mintAmount > MAX_SUPPLY) revert MintAmountExceedsSupply();
-        if (ALLOW_SUPPLYED +_mintAmount >MAX_ALLOW_SUPPLY) revert AllowMintInsufficient();
+        mintPublic(_mintAmount)
+    {   
+        require((getDate()<SELL_END_TIME),"timeout");
+        require(_mintAmount!=0,"zero mint");
+        require((ALLOW_SUPPLYED +_mintAmount <= MAX_ALLOW_SUPPLY),"MAX_ALLOW_SUPPLY");
 
         bytes32 x = keccak256(abi.encodePacked(msg.sender));
-        if (ECDSA.recover(x, signature) != signers) revert InvalidSignature();
+        require((ECDSA.recover(x, signature) == SIGNER),"error sign"); 
 
         uint64 userAux = _getAux(msg.sender);
         uint64 allowlistMinted = (userAux >> 4) & SECTION_BITMASK;
-        if (allowlistMinted + _mintAmount > ALLOW_LIMIT) revert MintAmountExceedsUserAllowance();
-        
-        if (msg.value < _mintAmount * ALLOW_LIST_PRICE) revert InsufficientFunds();
+        require((allowlistMinted + _mintAmount <= ALLOW_LIMIT),"MintAmountExceedsUserAllowance");
+        require((msg.value >= _mintAmount * ALLOW_LIST_PRICE),"InsufficientFunds");
 
-        _mint(msg.sender, _mintAmount);
         uint64 updatedAux = userAux + (_mintAmount << 4);
         _setAux(msg.sender, updatedAux);
         SUPPLY += _mintAmount;
-        emit MintedCounters(msg.sender,_mintAmount,ALLOW_CHANNEL);
+        allowlistMinted+=_mintAmount;
+        _mint(msg.sender, _mintAmount);
 
+        emit MintedCounters(msg.sender,_mintAmount,ALLOW_CHANNEL);
     }
 
 
@@ -135,13 +149,17 @@ contract BellaNFT is ERC721A, Ownable {
         callerIsUser
         mintPublic(_mintAmount)
     {
-        if (_mintAmount == 0) revert InvalidMintAmount();
-        if (SUPPLY + _mintAmount > MAX_SUPPLY) revert MintAmountExceedsSupply();
-        if (PUBLIC_SUPPLYED +_mintAmount>MAX_PUBLIC_SUPPLY) revert PublicMintInsufficient();
-        if (msg.value < _mintAmount * PUBLIC_PRICE) revert InsufficientFunds();
+        require((getDate()>SELL_START_TIME),"not start");
+        require(_mintAmount!=0,"zero mint");
+        require((_mintAmount <= PUBLIC_LIMIT),"limit mint");
+        if (getDate()<SELL_END_TIME){
+            require((PUBLIC_SUPPLYED +_mintAmount <= MAX_PUBLIC_SUPPLY),"PublicMintInsufficient");
+        }
+        require((msg.value >= _mintAmount * PUBLIC_PRICE),"InsufficientFunds");
+        SUPPLY += _mintAmount;
+        PUBLIC_SUPPLYED+= _mintAmount;
         _mint(msg.sender, _mintAmount);
         emit MintedCounters(msg.sender,_mintAmount,PUBLIC_CHANNEL);
-        SUPPLY += _mintAmount;
     }
 
     // onlyOwner functions
@@ -160,7 +178,7 @@ contract BellaNFT is ERC721A, Ownable {
         onlyOwner
     {
             if (_signer == address(0)) revert InvalidSignerAddress();
-            signers = _signer;
+            SIGNER = _signer;
             emit SetSignerAddress(_signer);
     }
 
@@ -192,19 +210,12 @@ contract BellaNFT is ERC721A, Ownable {
         emit SetURI(_uri);
     }
 
-    function setApprovalTime(uint _time)
-    external
-    onlyOwner{
-        _setApprovedStartTime(_time);
-        emit SetApprovalTime(_time);
-    }
 
-   
     function setPublicMintPrice(uint _mintPrice) 
         external 
         onlyOwner 
     {
-        if (_mintPrice < 0.01 ether) revert InvalidMintPriceChange();
+        if (_mintPrice < 0.0001 ether) revert InvalidMintPriceChange();
         PUBLIC_PRICE = _mintPrice;
         emit SetPublicPrice(_mintPrice);
     }
@@ -213,12 +224,24 @@ contract BellaNFT is ERC721A, Ownable {
         external 
         onlyOwner 
     {
-        if (_mintPrice < 0.01 ether) revert InvalidMintPriceChange();
+        if (_mintPrice < 0.0001 ether) revert InvalidMintPriceChange();
         ALLOW_LIST_PRICE = _mintPrice;
         emit SetWlPrice(_mintPrice);
     }
+    function setStartTime(uint _time) 
+        external 
+        onlyOwner 
+    {
+        SELL_START_TIME = _time;
+    }
+    function setEndTime(uint _time) 
+        external 
+        onlyOwner 
+    {
+        SELL_END_TIME = _time;
+    }
  
-
+    //
     function withdraw(uint256 _amount, address _to) 
         external 
         onlyOwner 
@@ -245,13 +268,6 @@ contract BellaNFT is ERC721A, Ownable {
         return (spender == owner || isApprovedForAll(owner, spender) || getApproved(tokenId) == spender);
     }
 
-    function getTime()
-        public 
-        view 
-        returns(uint) {
-            uint time = getDate();
-            return time;
-    }
     function getApprovedStartTime()
         public
         view
@@ -272,22 +288,6 @@ contract BellaNFT is ERC721A, Ownable {
     {
         return (_getAux(owner) >> 4) & SECTION_BITMASK;
     }
-    function numberMintedFree(address owner) 
-        public 
-        view 
-        returns (uint64) 
-    {
-        return (_getAux(owner) >> 8) & SECTION_BITMASK;
-    }
-
-    function numberMintedPublic(address owner) 
-        public 
-        view 
-        returns (uint64) 
-    {
-        return (_getAux(owner) >> 12) & SECTION_BITMASK;
-    }
-
     function _baseURI() 
         internal 
         view 
